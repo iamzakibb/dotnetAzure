@@ -1,0 +1,81 @@
+trigger:
+- main
+
+variables:
+  buildConfiguration: 'Release'
+  serviceConnection: 'Your-Azure-Service-Connection-Name'
+  azureAppServiceName: 'Your-App-Service-Name'
+  dotnetProjectPath: '**/*.csproj'  
+  workingDirectory: '$(System.DefaultWorkingDirectory)'
+
+stages:
+- stage: Build
+  displayName: Build stage
+  jobs:
+  - job: Build
+    displayName: Build job
+    pool:
+      vmImage: 'windows-latest'
+
+    steps:
+    - task: DotNetCoreCLI@2
+      displayName: Restore NuGet packages
+      inputs:
+        command: 'restore'
+        projects: '$(dotnetProjectPath)'
+
+    - task: DotNetCoreCLI@2
+      displayName: Build project
+      inputs:
+        command: 'build'
+        arguments: '--configuration $(buildConfiguration)'
+        projects: '$(dotnetProjectPath)'
+
+    - task: DotNetCoreCLI@2
+      displayName: Run tests
+      inputs:
+        command: 'test'
+        projects: '**/*Tests.csproj' # Update with your test project path
+        arguments: '--configuration $(buildConfiguration) --no-build'
+
+    - task: DotNetCoreCLI@2
+      displayName: Publish project
+      inputs:
+        command: 'publish'
+        projects: '$(dotnetProjectPath)'
+        arguments: '--configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)'
+        publishWebProjects: true
+        zipAfterPublish: true
+
+    - task: PublishPipelineArtifact@1
+      displayName: Publish artifact
+      inputs:
+        targetPath: '$(Build.ArtifactStagingDirectory)'
+        artifact: 'drop'
+        publishLocation: 'pipeline'
+
+- stage: Deploy
+  displayName: Deploy stage
+  dependsOn: Build
+  jobs:
+  - job: Deploy
+    displayName: Deploy job
+    pool:
+      vmImage: 'windows-latest'
+
+    steps:
+    - task: DownloadPipelineArtifact@2
+      displayName: Download artifact
+      inputs:
+        buildType: 'current'
+        artifactName: 'drop'
+        targetPath: '$(workingDirectory)'
+
+    - task: AzureWebApp@1
+      displayName: Deploy to Azure App Service
+      inputs:
+        azureSubscription: '$(serviceConnection)'
+        appType: 'webApp'
+        appName: '$(azureAppServiceName)'
+        package: '$(workingDirectory)/**/*.zip'
+        deploymentMethod: 'auto'
